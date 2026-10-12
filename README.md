@@ -2,7 +2,7 @@
 
 A GitHub Action that sends a pull request's diff, plus as much of the repo as fits in 384K tokens, to [SubQ Snap](https://docs.subq.ai/endpoints/decisions-api/). Snap answers **ship**, **needs_review** or **risky** in about a second, for about $0.015 per run at full context.
 
-The verdict goes on the PR as a label (`snap:ship`, `snap:needs_review` or `snap:risky`) and into the job summary, with the probability of each verdict.
+The verdict goes on the PR as a label (`snap:ship`, `snap:needs_review`, `snap:risky`, or `snap:unsure` when Snap isn't confident) and into the job summary, with the probability of each verdict.
 
 ## Usage
 
@@ -24,7 +24,7 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # needed to diff against the base branch
       - uses: Sukhendu2002/snap-pr-gate@v1
@@ -38,15 +38,28 @@ jobs:
 |---|---|---|
 | `api-key` | (required) | SubQ API key |
 | `fail-on` | `risky` | Fail the check at this verdict or worse: `needs_review`, `risky` or `never` |
+| `min-confidence` | `0.5` | Below this confidence the verdict becomes `unsure`, which never fails the check. `0` turns it off |
 | `label` | `true` | Label the PR with the verdict |
 | `github-token` | `github.token` | Token used to label the PR |
 | `max-chars` | `1200000` | Character budget for the diff plus repo files |
 
 The action also sets the outputs `verdict` and `confidence`.
 
+## Review rules
+
+Snap doesn't know what's risky in *your* codebase. Tell it in `.github/snap.md`, in plain English:
+
+```markdown
+- Anything in `lib/billing/` or `prisma/` is risky.
+- Copy and styling changes in `app/(marketing)/` can ship.
+- Changes to auth middleware always need review.
+```
+
+The rules are read from the **base branch**, so a PR can't rewrite them to approve itself. A change to the rules takes effect once it's merged.
+
 ## What Snap sees
 
-It sends the diff first, then the files the PR changes, then the rest of the repo's code. Docs and tests come last. It stops when the budget is used up. Lockfiles, minified files and binaries are skipped.
+It sends your review rules and the diff first, then the files the PR changes, then the rest of the repo's code. Docs and tests come last. It stops when the budget is used up. Lockfiles, minified files and binaries are skipped.
 
 ## Before you use it
 
