@@ -1,0 +1,60 @@
+name: Snap PR gate
+description: Ship / needs-review / risky verdict on a pull request, using SubQ Snap with the whole repo in context
+branding:
+  icon: shield
+  color: purple
+inputs:
+  api-key:
+    description: SubQ API key (store as a repo secret)
+    required: true
+  fail-on:
+    description: "Fail the check at this verdict or worse: needs_review, risky, or never"
+    default: risky
+  label:
+    description: Label the PR snap:ship / snap:needs_review / snap:risky (needs issues + pull-requests write permission)
+    default: 'true'
+  github-token:
+    description: Token used to label the PR
+    default: ${{ github.token }}
+  max-chars:
+    description: Character budget for diff + repo files (~4 chars per token; Snap takes 384K tokens)
+    default: '1200000'
+outputs:
+  verdict:
+    description: ship, needs_review or risky
+    value: ${{ steps.gate.outputs.verdict }}
+  confidence:
+    description: Snap's confidence in the verdict, 0 to 1
+    value: ${{ steps.gate.outputs.confidence }}
+runs:
+  using: composite
+  steps:
+    - id: gate
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/gate.mjs"
+      env:
+        SUBQ_API_KEY: ${{ inputs.api-key }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        MAX_CHARS: ${{ inputs.max-chars }}
+        BASE_REF: origin/${{ github.base_ref }}
+
+    # always(): still label the PR when the gate step failed on a risky verdict
+    - if: always() && inputs.label == 'true' && steps.gate.outputs.verdict != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        VERDICT: ${{ steps.gate.outputs.verdict }}
+      run: |
+        label() {
+          gh label create snap:ship --repo "$GITHUB_REPOSITORY" --color 2da44e --description "Snap PR gate: safe to merge" --force
+          gh label create snap:needs_review --repo "$GITHUB_REPOSITORY" --color d4a72c --description "Snap PR gate: a human should look" --force
+          gh label create snap:risky --repo "$GITHUB_REPOSITORY" --color cf222e --description "Snap PR gate: risky change" --force
+          for v in ship needs_review risky; do
+            # 404 when the PR doesn't have that label, which is fine
+            [ "$v" = "$VERDICT" ] || gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$PR/labels/snap:$v" >/dev/null 2>&1 || true
+          done
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f "labels[]=snap:$VERDICT" >/dev/null
+        }
+        # A missing permission shouldn't fail the check; the verdict is already in the summary
+        label || echo "::warning::Could not label the PR. Give the workflow 'issues: write' and 'pull-requests: write' permissions."
