@@ -10,6 +10,9 @@ inputs:
   fail-on:
     description: "Fail the check at this verdict or worse: needs_review, risky, or never"
     default: risky
+  min-confidence:
+    description: Below this confidence (0 to 1) the verdict becomes "unsure", which never fails the check. 0 turns it off
+    default: '0.5'
   label:
     description: Label the PR snap:ship / snap:needs_review / snap:risky (needs issues + pull-requests write permission)
     default: 'true'
@@ -21,7 +24,7 @@ inputs:
     default: '1200000'
 outputs:
   verdict:
-    description: ship, needs_review or risky
+    description: ship, needs_review, risky or unsure
     value: ${{ steps.gate.outputs.verdict }}
   confidence:
     description: Snap's confidence in the verdict, 0 to 1
@@ -36,6 +39,7 @@ runs:
         SUBQ_API_KEY: ${{ inputs.api-key }}
         FAIL_ON: ${{ inputs.fail-on }}
         MAX_CHARS: ${{ inputs.max-chars }}
+        MIN_CONFIDENCE: ${{ inputs.min-confidence }}
         BASE_REF: origin/${{ github.base_ref }}
 
     # always(): still label the PR when the gate step failed on a risky verdict
@@ -50,7 +54,8 @@ runs:
           gh label create snap:ship --repo "$GITHUB_REPOSITORY" --color 2da44e --description "Snap PR gate: safe to merge" --force
           gh label create snap:needs_review --repo "$GITHUB_REPOSITORY" --color d4a72c --description "Snap PR gate: a human should look" --force
           gh label create snap:risky --repo "$GITHUB_REPOSITORY" --color cf222e --description "Snap PR gate: risky change" --force
-          for v in ship needs_review risky; do
+          gh label create snap:unsure --repo "$GITHUB_REPOSITORY" --color 8c959f --description "Snap PR gate: low confidence, no verdict" --force
+          for v in ship needs_review risky unsure; do
             # 404 when the PR doesn't have that label, which is fine
             [ "$v" = "$VERDICT" ] || gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$PR/labels/snap:$v" >/dev/null 2>&1 || true
           done
